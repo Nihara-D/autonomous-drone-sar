@@ -2,6 +2,8 @@
 
 A simulation-based drone autonomy platform for autonomous search and rescue operations. Combines ArduPilot SITL with a full-stack web dashboard for mission planning and real-time telemetry monitoring.
 
+![Dashboard Preview](Dashboard.png)
+
 **Author:** Nihara Dayarathne (shniharard@gmail.com)
 
 ## Features
