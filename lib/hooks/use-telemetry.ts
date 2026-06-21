@@ -1,6 +1,21 @@
+declare module 'react' {
+  export function useEffect(effect: () => void | (() => void), deps?: readonly any[] | undefined): void;
+  export function useState<S>(initialState: S | (() => S)): [S, (value: S | ((prevState: S) => S)) => void];
+  export function useRef<T>(initialValue: T): { current: T };
+  export function useCallback<T extends (...args: any[]) => any>(callback: T, deps: readonly any[] | undefined): T;
+}
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 
+
+
+
+// Avoid NodeJS namespace types in browser builds.
+type NodeTimer = ReturnType<typeof setTimeout>;
+
 interface TelemetryData {
+
+
   latitude: number;
   longitude: number;
   altitude: number;
@@ -21,9 +36,12 @@ interface TelemetryData {
 export function useTelemetry(enabled: boolean = true) {
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
   const [markers, setMarkers] = useState<Array<any>>([]);
+  const MAX_MARKERS = 200;
+
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<NodeTimer | null>(null);
+
 
   const connect = useCallback(() => {
     if (!enabled || wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -38,24 +56,31 @@ export function useTelemetry(enabled: boolean = true) {
         setIsConnected(true);
       };
 
-      wsRef.current.onmessage = (event) => {
+      wsRef.current.onmessage = (event: MessageEvent) => {
         try {
-          const message = JSON.parse(event.data);
+          const message = JSON.parse(event.data as string);
+
 
           if (message.type === 'telemetry') {
             setTelemetry(message.data);
           } else if (message.type === 'marker_detected') {
-            setMarkers((prev) => [...prev, message.data]);
+            setMarkers((prev: Array<any>) => {
+              const next = [...prev, message.data];
+
+              return next.length > MAX_MARKERS ? next.slice(next.length - MAX_MARKERS) : next;
+            });
           } else if (message.type === 'mission_complete') {
             console.log('[Telemetry] Mission complete:', message.data);
           }
+
         } catch (error) {
           console.error('[Telemetry] Parse error:', error);
         }
       };
 
-      wsRef.current.onerror = (error) => {
+      wsRef.current.onerror = (error: Event) => {
         console.error('[Telemetry] WebSocket error:', error);
+
         setIsConnected(false);
       };
 

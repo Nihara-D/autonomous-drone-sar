@@ -29,8 +29,10 @@ vision = VisionSystem()
 
 # Global state
 mission_active = False
+mission_task: asyncio.Task | None = None
 current_frame_number = 0
 connected_clients = set()
+
 
 # CORS configuration
 app.add_middleware(
@@ -146,25 +148,42 @@ async def get_detections():
 @app.post("/api/mission/start")
 async def start_autonomous_mission(background_tasks: BackgroundTasks):
     """Start autonomous grid search mission"""
-    global mission_active
-    
+    global mission_active, mission_task
+
+
     if not drone.vehicle:
         raise HTTPException(status_code=400, detail="Drone not connected")
-    
+
+    if mission_task and not mission_task.done():
+        raise HTTPException(status_code=409, detail="Mission already running")
+
     if not planner.waypoints:
         raise HTTPException(status_code=400, detail="No mission waypoints generated")
-    
+
     mission_active = True
-    background_tasks.add_task(autonomous_mission_loop)
-    
+    mission_task = background_tasks.add_task(autonomous_mission_loop)
+
     return {"success": True, "message": "Autonomous mission started"}
+
 
 @app.post("/api/mission/stop")
 async def stop_mission():
-    """Stop autonomous mission"""
+    """Stop autonomous mission.
+
+    Immediately switches to RTL to match UI expectation.
+    """
     global mission_active
     mission_active = False
+
+    # Best-effort: switch mode right away.
+    if drone.vehicle:
+        try:
+            await drone.return_to_launch()
+        except Exception:
+            pass
+
     return {"success": True, "message": "Mission stopped, initiating RTL"}
+
 
 # ===== WebSocket for Real-time Telemetry =====
 
@@ -214,56 +233,67 @@ async def autonomous_mission_loop():
     waypoint_timeout = 0
     
     while mission_active and planner.current_waypoint_index < len(planner.waypoints):
-        # Get next waypoint
         waypoint = planner.get_next_waypoint()
         if not waypoint:
             break
-        
+
         lat, lon, alt = waypoint
-        
-        # Send drone to waypoint
-        await drone.fly_to_waypoint(lat, lon, alt)
-        
-        # Wait at waypoint and process vision
-        for i in range(30):  # 30 iterations = ~3 seconds at 10Hz
+
+        # Send drone to waypoint and wait for arrival (deterministic mission behavior)
+        sent = await drone.fly_to_waypoint(lat, lon, alt)
+        if not sent:
+            continue
+
+        reached = await drone.wait_until_waypoint_reached(
+            lat,
+            lon,
+            alt,
+            horizontal_threshold_m=6.0,
+            altitude_threshold_m=2.0,
+            timeout_s=90.0,
+            poll_interval_s=1.0,
+        )
+        if not reached:
+            continue
+
+        # Process vision at waypoint
+        for _ in range(30):  # ~3 seconds at 10Hz
             if not mission_active:
                 break
-            
-            # Simulate camera feed and detect markers
+
             frame = vision.simulate_camera_feed(current_frame_number)
             detections = vision.detect_red_marker(frame)
             current_frame_number += 1
-            
-            # If marker detected, log it
+
             if detections:
                 for detection in detections:
-                    # Convert pixel coords to simulated GPS (simplified)
-                    # In real scenario, would use georeferencing
                     lat_offset = (detection["center"][0] - 320) / 111000
                     lon_offset = (detection["center"][1] - 240) / 111000
-                    
+
                     marker_lat = lat + lat_offset
                     marker_lon = lon + lon_offset
-                    
-                    drone.add_detected_marker(
-                        marker_lat, marker_lon, detection["confidence"]
-                    )
-                    
-                    # Broadcast to all connected clients
-                    for client in connected_clients:
-                        try:
-                            await client.send_json({
-                                "type": "marker_detected",
-                                "data": {
-                                    "latitude": marker_lat,
-                                    "longitude": marker_lon,
-                                    "confidence": detection["confidence"]
-                                }
-                            })
-                        except:
-                            pass
-            
+
+                    # Cap growth to keep WS + UI responsive
+                    if len(drone.detected_markers) < 200:
+                        drone.add_detected_marker(marker_lat, marker_lon, detection["confidence"])
+
+                        for client in list(connected_clients):
+                            try:
+                                await client.send_json(
+                                    {
+                                        "type": "marker_detected",
+                                        "data": {
+                                            "latitude": marker_lat,
+                                            "longitude": marker_lon,
+                                            "confidence": detection["confidence"],
+                                        },
+                                    }
+                                )
+                            except Exception:
+                                pass
+
             await asyncio.sleep(0.1)
+
     
     # Mission complete
     print("[Mission] Grid search complete, returning home")

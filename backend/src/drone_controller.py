@@ -3,10 +3,11 @@ DroneKit wrapper for ArduPilot SITL control and telemetry
 """
 import time
 import asyncio
-from typing import Callable, Optional
+import math
+from typing import Callable
 from dronekit import connect, VehicleMode, LocationGlobalRelative
-from pymavlink.dialects.v10 import mavutil
 import config
+
 
 class DroneController:
     def __init__(self):
@@ -81,18 +82,58 @@ class DroneController:
             return False
     
     async def fly_to_waypoint(self, lat: float, lon: float, alt: float) -> bool:
-        """Fly to a specific waypoint"""
-        if not self.vehicle or not self.is_flying:
+        """Send the drone to a specific waypoint.
+
+        Note: This does NOT wait for arrival. Use wait_until_waypoint_reached().
+        """
+        if not self.vehicle:
             return False
-        
+
         try:
             point = LocationGlobalRelative(lat, lon, alt)
             self.vehicle.simple_goto(point)
-            print(f"[Drone] Flying to waypoint: {lat:.4f}, {lon:.4f}, {alt}m")
             return True
-        except Exception as e:
-            print(f"[Drone] Waypoint flight failed: {e}")
+        except Exception:
             return False
+
+    async def wait_until_waypoint_reached(
+        self,
+        lat: float,
+        lon: float,
+        alt: float,
+        horizontal_threshold_m: float = 6.0,
+        altitude_threshold_m: float = 2.0,
+        timeout_s: float = 90.0,
+        poll_interval_s: float = 1.0,
+    ) -> bool:
+        """Wait until the vehicle reaches a waypoint (distance + altitude)."""
+        if not self.vehicle:
+            return False
+
+        start = time.time()
+        while time.time() - start <= timeout_s:
+            loc = self.vehicle.location
+            current = loc.global_relative_frame
+            if not current:
+                await asyncio.sleep(poll_interval_s)
+                continue
+
+            # Approx horizontal distance (meters) using equirectangular approximation.
+            d_lat = math.radians(lat - current.lat)
+            d_lon = math.radians(lon - current.lon)
+            mean_lat = math.radians((lat + current.lat) / 2)
+            x = d_lon * math.cos(mean_lat)
+            y = d_lat
+            horizontal_m = 6371000.0 * math.hypot(x, y)
+            alt_m = abs(current.alt - alt)
+
+            if horizontal_m <= horizontal_threshold_m and alt_m <= altitude_threshold_m:
+                return True
+
+            await asyncio.sleep(poll_interval_s)
+
+        return False
+
     
     async def return_to_launch(self) -> bool:
         """Return to home location"""
