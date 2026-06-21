@@ -2,7 +2,13 @@
 
 A simulation-based drone autonomy platform for autonomous search and rescue operations. Combines ArduPilot SITL with a full-stack web dashboard for mission planning and real-time telemetry monitoring.
 
+<p align="center">
+  <img src="https://img.shields.io/badge/status-under__development-f1c40f?style=for-the-badge&logo=githubactions&logoColor=white&labelColor=2c3e50" />
+</p>
+
+
 ![Dashboard Preview](Dashboard.png)
+
 
 **Author:** Nihara Dayarathne (shniharard@gmail.com)
 
