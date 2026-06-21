@@ -1,0 +1,12 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+dronekit==2.9.2
+dronekit-sitl==3.8.5.4
+pymavlink==2.4.41
+opencv-python==4.8.1.78
+numpy==1.24.3
+scipy==1.11.4
+aiofiles==23.2.1
+python-dotenv==1.0.0
+pydantic==2.5.0

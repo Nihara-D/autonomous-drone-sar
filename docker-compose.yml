@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+      - "8765:8765"
+    environment:
+      - SITL_HOST=127.0.0.1
+      - SITL_PORT=14550
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - ENV=production
+    volumes:
+      - ./backend:/app
+    networks:
+      - drone_network
+
+  frontend:
+    image: node:20
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+    command: npm run dev
+    networks:
+      - drone_network
+
+  sitl:
+    image: ardupilot/ardupilot:sitl
+    ports:
+      - "14550:14550/udp"
+    environment:
+      - INSTANCE=0
+      - SPEEDUP=1
+    networks:
+      - drone_network
+    command: /entrypoint.sh
+
+networks:
+  drone_network:
+    driver: bridge
